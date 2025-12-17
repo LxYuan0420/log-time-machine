@@ -139,7 +139,8 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(area.height.saturating_sub(1).max(1)),
+            Constraint::Length(area.height.saturating_sub(2).max(1)),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(area);
@@ -151,6 +152,14 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         .max(max_value)
         .style(Style::default().fg(Color::Cyan));
     frame.render_widget(sparkline, parts[0]);
+
+    let band = build_band_spans(&data, parts[1].width as usize);
+    let band_para = Paragraph::new(Line::from(band)).block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    frame.render_widget(band_para, parts[1]);
 
     let mut marks = vec!['.'; data.len()];
     if let Some(cursor) = app.timeline_cursor_from_end() {
@@ -185,10 +194,10 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let marker_str: String = marks.iter().collect();
-    let trimmed = if marker_str.len() > parts[1].width as usize {
+    let trimmed = if marker_str.len() > parts[2].width as usize {
         marker_str
             .chars()
-            .take(parts[1].width as usize)
+            .take(parts[2].width as usize)
             .collect::<String>()
     } else {
         marker_str
@@ -198,7 +207,39 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
             .border_style(Style::default().fg(Color::DarkGray)),
     );
-    frame.render_widget(markers, parts[1]);
+    frame.render_widget(markers, parts[2]);
+}
+
+fn build_band_spans(data: &[crate::timeline::Bin], width: usize) -> Vec<Span<'static>> {
+    if data.is_empty() || width == 0 {
+        return vec![Span::raw("")];
+    }
+    let len = data.len();
+    let step = len.div_ceil(width).max(1);
+    let mut spans = Vec::new();
+    let mut idx = 0;
+    while idx < len && spans.len() < width {
+        let mut info = 0;
+        let mut warn = 0;
+        let mut error = 0;
+        for bin in data.iter().skip(idx).take(step) {
+            info += bin.info;
+            warn += bin.warn;
+            error += bin.error;
+        }
+        let color = if error > 0 {
+            Color::Red
+        } else if warn > 0 {
+            Color::Yellow
+        } else if info > 0 {
+            Color::White
+        } else {
+            Color::DarkGray
+        };
+        spans.push(Span::styled(" ", Style::default().bg(color)));
+        idx += step;
+    }
+    spans
 }
 
 fn render_status(frame: &mut Frame, area: Rect, app: &App) {

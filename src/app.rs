@@ -1,5 +1,6 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
+    fs,
     time::{Duration, Instant},
 };
 
@@ -41,6 +42,14 @@ pub struct Bookmark {
     pub label: String,
 }
 
+pub struct DiffStats {
+    pub total: usize,
+    pub info: usize,
+    pub warn: usize,
+    pub error: usize,
+    pub top_targets: Vec<(String, usize)>,
+}
+
 pub struct App {
     pub mode: Mode,
     logs: VecDeque<LogEntry>,
@@ -61,6 +70,7 @@ pub struct App {
     diff_b: Option<DateTime<Local>>,
     pub show_help: bool,
     last_tick: Instant,
+    last_notice: Option<String>,
 }
 
 impl App {
@@ -85,6 +95,7 @@ impl App {
             diff_b: None,
             show_help: false,
             last_tick: Instant::now(),
+            last_notice: None,
         }
     }
 
@@ -350,7 +361,7 @@ impl App {
         }
     }
 
-    pub fn diff_summary(&self) -> Option<(usize, usize, usize)> {
+    pub fn diff_summary(&self) -> Option<DiffStats> {
         let (a, b) = match (self.diff_a, self.diff_b) {
             (Some(a), Some(b)) => (a.min(b), a.max(b)),
             _ => return None,
@@ -358,6 +369,8 @@ impl App {
         let mut info = 0;
         let mut warn = 0;
         let mut error = 0;
+        let mut targets: HashMap<String, usize> = HashMap::new();
+        let mut total = 0;
         for entry in self
             .logs
             .iter()
@@ -366,13 +379,65 @@ impl App {
             if !self.filters.matches(entry) {
                 continue;
             }
+            total += 1;
             match entry.level {
                 Level::Info => info += 1,
                 Level::Warn => warn += 1,
                 Level::Error => error += 1,
             }
+            *targets.entry(entry.target.clone()).or_default() += 1;
         }
-        Some((info, warn, error))
+        let mut top_targets: Vec<(String, usize)> = targets.into_iter().collect();
+        top_targets.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        top_targets.truncate(5);
+        Some(DiffStats {
+            total,
+            info,
+            warn,
+            error,
+            top_targets,
+        })
+    }
+
+    pub fn export_diff(&mut self) {
+        let (a, b) = match (self.diff_a, self.diff_b) {
+            (Some(a), Some(b)) => (a.min(b), a.max(b)),
+            _ => {
+                self.last_notice = Some("Set A and B before exporting".to_string());
+                return;
+            }
+        };
+        let filtered: Vec<&LogEntry> = self
+            .logs
+            .iter()
+            .filter(|e| e.timestamp >= a && e.timestamp <= b)
+            .filter(|e| self.filters.matches(e))
+            .collect();
+        if filtered.is_empty() {
+            self.last_notice = Some("No lines in diff range (after filters)".to_string());
+            return;
+        }
+        let path = format!(
+            "/tmp/logtm_diff_{}.log",
+            Local::now().format("%Y%m%d%H%M%S")
+        );
+        let body = filtered
+            .iter()
+            .map(|e| {
+                format!(
+                    "{} {:5} {:<7} {}",
+                    e.timestamp.to_rfc3339(),
+                    e.level.label(),
+                    e.target,
+                    e.message
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        match fs::write(&path, body) {
+            Ok(_) => self.last_notice = Some(format!("Exported diff slice to {path}")),
+            Err(err) => self.last_notice = Some(format!("Export failed: {err}")),
+        }
     }
 
     pub fn visible_logs(&self, max_visible: usize) -> Vec<(usize, &LogEntry)> {
@@ -455,6 +520,10 @@ impl App {
 
     pub fn source_label(&self) -> &str {
         &self.source_label
+    }
+
+    pub fn last_notice(&self) -> Option<&String> {
+        self.last_notice.as_ref()
     }
 
     pub fn input_mode_mut(&mut self) -> &mut InputMode {

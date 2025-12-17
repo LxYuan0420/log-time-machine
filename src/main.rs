@@ -107,6 +107,7 @@ fn handle_normal_key(app: &mut app::App, key: crossterm::event::KeyEvent) -> Res
         KeyCode::Char('S') => app.jump_spike(-1),
         KeyCode::Char('A') => app.set_diff_a(),
         KeyCode::Char('B') => app.set_diff_b(),
+        KeyCode::Char('E') => app.export_diff(),
         KeyCode::Char('?') => app.show_help = !app.show_help,
         _ => {}
     }

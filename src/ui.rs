@@ -61,7 +61,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 " / filter | R toggle regex | F clear | 1/2/3 toggle levels | n/p next/prev error",
             ),
             Line::from(" b add bookmark | ]/[ next/prev bookmark"),
-            Line::from(" A/B set diff markers"),
+            Line::from(" A/B set diff markers | E export diff slice"),
             Line::from(""),
             Line::from("While scrolling up we auto-pause; queued lines show as +N."),
             Line::from("Timeline cursor moves with left/right; markers show bookmarks and cursor."),
@@ -255,7 +255,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw(bookmarks),
         Span::raw(" · "),
         Span::raw(
-            "keys: pgup/pgdn scroll, left/right timeline, / filter, F clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff",
+            "keys: pgup/pgdn scroll, left/right timeline, / filter, F clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, E export",
         ),
     ])];
 
@@ -277,11 +277,30 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
             a.format("%H:%M:%S"),
             b.format("%H:%M:%S")
         )));
-        if let Some((info, warn, error)) = app.diff_summary() {
+        if let Some(stats) = app.diff_summary() {
+            let targets = if stats.top_targets.is_empty() {
+                "top targets: (none)".to_string()
+            } else {
+                let joined = stats
+                    .top_targets
+                    .iter()
+                    .map(|(t, c)| format!("{t}({c})"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("top targets: {joined}")
+            };
             lines.push(Line::from(format!(
-                "Counts in range (filtered): info={info} warn={warn} error={error}"
+                "Counts in range (filtered): total={} info={} warn={} error={} · {}",
+                stats.total, stats.info, stats.warn, stats.error, targets
             )));
         }
+    }
+
+    if let Some(msg) = app.last_notice() {
+        lines.push(Line::from(Span::styled(
+            msg.clone(),
+            Style::default().fg(Color::Green),
+        )));
     }
 
     let status = Paragraph::new(lines).block(

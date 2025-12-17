@@ -23,7 +23,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Sparkline},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Sparkline},
     Terminal,
 };
 use regex::Regex;
@@ -285,6 +285,22 @@ impl Timeline {
         let (start, _) = self.range();
         start + self.bin_width * (idx_from_oldest as i32)
     }
+
+    fn bin_index_for(&self, ts: DateTime<Local>) -> Option<usize> {
+        let (start, end) = self.range();
+        if ts < start || ts >= end {
+            return None;
+        }
+        let offset = ts - start;
+        let secs = offset.num_seconds();
+        let bin_secs = self.bin_width.num_seconds().max(1);
+        let idx = (secs / bin_secs) as usize;
+        if idx < self.bins.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -306,6 +322,7 @@ struct App {
     timeline_cursor_from_end: Option<usize>,
     diff_a: Option<DateTime<Local>>,
     diff_b: Option<DateTime<Local>>,
+    show_help: bool,
 }
 
 impl App {
@@ -328,6 +345,7 @@ impl App {
             timeline_cursor_from_end: None,
             diff_a: None,
             diff_b: None,
+            show_help: false,
         }
     }
 
@@ -842,6 +860,14 @@ fn run_app(
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    if app.show_help {
+                        match key.code {
+                            KeyCode::Char('?') | KeyCode::Esc => app.show_help = false,
+                            _ => {}
+                        }
+                        continue;
+                    }
+
                     match &mut app.input_mode {
                         InputMode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Char('c')
@@ -879,6 +905,7 @@ fn run_app(
                             KeyCode::Char('S') => app.jump_spike(-1),
                             KeyCode::Char('A') => app.set_diff_a(),
                             KeyCode::Char('B') => app.set_diff_b(),
+                            KeyCode::Char('?') => app.show_help = !app.show_help,
                             _ => {}
                         },
                         InputMode::FilterText(buf) => match key.code {
@@ -928,6 +955,32 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &App) {
     render_logs(frame, chunks[1], app);
     render_timeline(frame, chunks[2], app);
     render_status(frame, chunks[3], app);
+
+    if app.show_help {
+        let area = centered_rect(70, 60, frame.size());
+        frame.render_widget(Clear, area);
+        let help = Paragraph::new(vec![
+            Line::from("Keys:"),
+            Line::from(" q/ctrl-c quit | space pause | g/end go live | arrows/pgup/pgdn scroll"),
+            Line::from(" left/right timeline | s/S jump spikes"),
+            Line::from(
+                " / filter | R toggle regex | F clear | 1/2/3 toggle levels | n/p next/prev error",
+            ),
+            Line::from(" b add bookmark | ]/[ next/prev bookmark"),
+            Line::from(" A/B set diff markers"),
+            Line::from(""),
+            Line::from("While scrolling up we auto-pause; queued lines show as +N."),
+            Line::from("Timeline cursor moves with left/right; markers show bookmarks and cursor."),
+            Line::from("Press ? or Esc to close this help."),
+        ])
+        .block(
+            Block::default()
+                .title("Help")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Magenta)),
+        );
+        frame.render_widget(help, area);
+    }
 }
 
 fn render_header(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
@@ -938,7 +991,7 @@ fn render_header(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &
             app.mode.label()
         )),
         Line::from(
-            "q: quit  space: pause/resume  arrows: scroll  left/right: timeline  g/end: go live",
+            "q: quit  space: pause/resume  arrows: scroll  left/right: timeline  g/end: go live  ?: help",
         ),
     ])
     .block(
@@ -985,12 +1038,68 @@ fn render_timeline(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app:
         cursor_text.unwrap_or_default()
     );
 
+    let parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(area.height.saturating_sub(1).max(1)),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
     let sparkline = Sparkline::default()
         .block(Block::default().title(title).borders(Borders::ALL))
         .data(&data)
         .max(max_value)
         .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(sparkline, area);
+    frame.render_widget(sparkline, parts[0]);
+
+    let mut marks = vec!['.'; data.len()];
+    if let Some(cursor) = app.timeline_cursor_from_end {
+        let len = data.len();
+        if len > 0 {
+            let idx_from_oldest = len.saturating_sub(cursor + 1);
+            if idx_from_oldest < marks.len() {
+                marks[idx_from_oldest] = '^';
+            }
+        }
+    }
+    for bm in &app.bookmarks {
+        if let Some(idx) = app.timeline.bin_index_for(bm.timestamp) {
+            if let Some(slot) = marks.get_mut(idx) {
+                *slot = if *slot == '^' { '#' } else { '*' };
+            }
+        }
+    }
+    if let Some(a) = app.diff_a {
+        if let Some(idx) = app.timeline.bin_index_for(a) {
+            if let Some(slot) = marks.get_mut(idx) {
+                *slot = 'A';
+            }
+        }
+    }
+    if let Some(b) = app.diff_b {
+        if let Some(idx) = app.timeline.bin_index_for(b) {
+            if let Some(slot) = marks.get_mut(idx) {
+                *slot = 'B';
+            }
+        }
+    }
+
+    let marker_str: String = marks.iter().collect();
+    let trimmed = if marker_str.len() > parts[1].width as usize {
+        marker_str
+            .chars()
+            .take(parts[1].width as usize)
+            .collect::<String>()
+    } else {
+        marker_str
+    };
+    let markers = Paragraph::new(trimmed).block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    frame.render_widget(markers, parts[1]);
 }
 
 fn render_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
@@ -1263,8 +1372,7 @@ mod tests {
 
     #[test]
     fn parse_line_understands_timestamp_and_level() {
-        let entry =
-            parse_line("2024-12-17T12:00:00Z ERROR db deadlock retry txn=7 attempt=1");
+        let entry = parse_line("2024-12-17T12:00:00Z ERROR db deadlock retry txn=7 attempt=1");
         assert_eq!(entry.level, Level::Error);
         assert_eq!(entry.target, "db");
         assert!(entry.message.contains("deadlock"));
@@ -1280,7 +1388,9 @@ mod tests {
         };
         let mut filters = Filters::default();
         filters.regex_mode = true;
-        filters.set_text(Some("deadlock.*txn=7".to_string())).unwrap();
+        filters
+            .set_text(Some("deadlock.*txn=7".to_string()))
+            .unwrap();
         assert!(filters.matches(&entry));
     }
 
@@ -1293,4 +1403,27 @@ mod tests {
         assert_eq!(timeline.data().len(), 5);
         assert!(timeline.data().iter().any(|v| *v >= 2));
     }
+}
+
+fn centered_rect(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

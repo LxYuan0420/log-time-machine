@@ -10,6 +10,7 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Filters: `/` to enter text (toggle regex with `R`), `F` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error
 - Bookmarks: `b` add, `]`/`[` next/prev
 - Diff stub: `A`/`B` set range markers; counts show in status
+- Help overlay: `?` to toggle; timeline shows cursor/bookmark/diff markers
 
 ## Run it
 - Mock feed: `cargo run` or `make run-mock`

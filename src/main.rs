@@ -1223,7 +1223,7 @@ fn spawn_stdin_reader() -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let stdin = io::stdin();
-        for line in stdin.lock().lines().flatten() {
+        for line in stdin.lock().lines().map_while(Result::ok) {
             let _ = tx.send(line);
         }
     });

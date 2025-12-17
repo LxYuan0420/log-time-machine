@@ -396,9 +396,13 @@ impl App {
     }
 
     pub fn clear_diff(&mut self) {
-        self.diff_a = None;
-        self.diff_b = None;
-        self.last_notice = Some("Cleared diff markers".to_string());
+        if self.diff_a.is_some() || self.diff_b.is_some() {
+            self.diff_a = None;
+            self.diff_b = None;
+            self.last_notice = Some("Cleared diff markers".to_string());
+        } else {
+            self.last_notice = Some("No diff markers to clear".to_string());
+        }
     }
 
     pub fn diff_summary(&self) -> Option<DiffStats> {

@@ -103,6 +103,12 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             if app.filters().warn { "W" } else { "w" },
             if app.filters().error { "E" } else { "e" },
         )),
+        match app.input_mode() {
+            crate::filters::InputMode::FilterText(buf) => {
+                Line::from(format!("Typing filter: {buf}_ (Enter apply, Esc cancel)"))
+            }
+            crate::filters::InputMode::Normal => Line::from(""),
+        },
     ])
     .block(
         Block::default()
@@ -356,6 +362,10 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
                 stats.total, stats.info, stats.warn, stats.error, targets
             )));
         }
+    } else {
+        lines.push(Line::from(
+            "Diff: set with A/B, clear with X, export with E",
+        ));
     }
 
     if let Some(msg) = app.last_notice() {

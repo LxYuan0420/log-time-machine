@@ -45,8 +45,16 @@ impl Filters {
                 }
                 return true;
             }
-            entry.message.to_lowercase().contains(&text.to_lowercase())
-                || entry.target.to_lowercase().contains(&text.to_lowercase())
+            let needle = text.to_lowercase();
+            entry.message.to_lowercase().contains(&needle)
+                || entry.target.to_lowercase().contains(&needle)
+                || entry.level.label().to_lowercase().contains(&needle)
+                || entry
+                    .timestamp
+                    .format("%Y-%m-%dT%H:%M:%S")
+                    .to_string()
+                    .to_lowercase()
+                    .contains(&needle)
         } else {
             true
         }

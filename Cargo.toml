@@ -1,0 +1,11 @@
+[package]
+name = "log-time-machine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.28"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rand = { version = "0.8", features = ["small_rng"] }
+ratatui = { version = "0.27", features = ["crossterm"] }

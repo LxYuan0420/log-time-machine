@@ -7,5 +7,7 @@ edition = "2021"
 anyhow = "1.0"
 crossterm = "0.28"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.11"
 rand = { version = "0.8", features = ["small_rng"] }
 ratatui = { version = "0.27", features = ["crossterm"] }

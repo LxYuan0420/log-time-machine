@@ -1,0 +1,10 @@
+2024-12-17T12:00:00Z INFO http GET /health 200 3ms
+2024-12-17T12:00:02Z INFO worker job started id=42
+2024-12-17T12:00:03Z WARN cache cache miss user=123 latency=23ms
+2024-12-17T12:00:04Z ERROR db deadlock retry txn=7 attempt=1
+2024-12-17T12:00:05Z ERROR db deadlock retry txn=7 attempt=2
+2024-12-17T12:00:06Z INFO worker job completed id=42 dur=4s
+2024-12-17T12:00:08Z INFO http GET /orders 200 17ms
+2024-12-17T12:00:10Z WARN http GET /orders 500 deadlock txn=7
+2024-12-17T12:00:12Z INFO auth login user=alice
+2024-12-17T12:00:14Z INFO http GET /health 200 2ms

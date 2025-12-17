@@ -4,9 +4,16 @@ use chrono::{DateTime, Local};
 
 #[derive(Debug, Clone)]
 pub struct Timeline {
-    bins: VecDeque<u64>,
+    bins: VecDeque<Bin>,
     bin_width: chrono::Duration,
     last_bin_start: DateTime<Local>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Bin {
+    pub info: u64,
+    pub warn: u64,
+    pub error: u64,
 }
 
 impl Timeline {
@@ -16,16 +23,18 @@ impl Timeline {
         let bin_width = chrono::Duration::seconds(bin_secs as i64);
         let now = Local::now();
         Self {
-            bins: VecDeque::from(vec![0; bin_count.max(1)]),
+            bins: VecDeque::from(vec![Bin::default(); bin_count.max(1)]),
             bin_width,
             last_bin_start: now - bin_width,
         }
     }
 
-    pub fn record(&mut self, now: DateTime<Local>, count: u64) {
+    pub fn record(&mut self, now: DateTime<Local>, info: u64, warn: u64, error: u64) {
         self.advance(now);
         if let Some(last) = self.bins.back_mut() {
-            *last += count;
+            last.info += info;
+            last.warn += warn;
+            last.error += error;
         }
     }
 
@@ -35,12 +44,12 @@ impl Timeline {
         }
         while now - self.last_bin_start >= self.bin_width {
             self.bins.pop_front();
-            self.bins.push_back(0);
+            self.bins.push_back(Bin::default());
             self.last_bin_start += self.bin_width;
         }
     }
 
-    pub fn data(&self) -> Vec<u64> {
+    pub fn data(&self) -> Vec<Bin> {
         self.bins.iter().copied().collect()
     }
 
@@ -90,9 +99,12 @@ mod tests {
     fn timeline_tracks_bins() {
         let mut timeline = Timeline::new(5, Duration::from_secs(5));
         let now = Local::now();
-        timeline.record(now, 3);
-        timeline.record(now + chrono::Duration::seconds(6), 2);
+        timeline.record(now, 3, 1, 0);
+        timeline.record(now + chrono::Duration::seconds(6), 2, 0, 1);
         assert_eq!(timeline.data().len(), 5);
-        assert!(timeline.data().iter().any(|v| *v >= 2));
+        assert!(timeline
+            .data()
+            .iter()
+            .any(|v| v.info + v.warn + v.error >= 2));
     }
 }

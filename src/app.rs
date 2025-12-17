@@ -102,11 +102,18 @@ impl App {
     pub fn tick(&mut self) {
         let now = Local::now();
         let new_entries = drain_ingest(&mut self.ingest);
-        let new_lines = new_entries.len();
+        let mut info = 0;
+        let mut warn = 0;
+        let mut error = 0;
         for entry in new_entries {
+            match entry.level {
+                Level::Info => info += 1,
+                Level::Warn => warn += 1,
+                Level::Error => error += 1,
+            }
             self.push_log(entry);
         }
-        self.timeline.record(now, new_lines as u64);
+        self.timeline.record(now, info, warn, error);
         self.prune(now);
         if matches!(self.mode, Mode::Live) {
             self.scroll_offset = 0;
@@ -325,19 +332,31 @@ impl App {
         if data.is_empty() {
             return;
         }
-        let max = *data.iter().max().unwrap_or(&0);
+        let max = data
+            .iter()
+            .map(|b| b.info + b.warn + b.error)
+            .max()
+            .unwrap_or(0);
         let threshold = std::cmp::max(1, (max as f64 * 0.5).ceil() as u64);
         let len = data.len();
         let current_cursor = self.timeline_cursor_from_end.unwrap_or(0);
         let mut idx_from_oldest = len.saturating_sub(current_cursor + 1);
         if direction > 0 {
             idx_from_oldest = ((idx_from_oldest + 1)..len)
-                .find(|&i| data.get(i).copied().unwrap_or(0) >= threshold)
+                .find(|&i| {
+                    data.get(i)
+                        .map(|b| b.info + b.warn + b.error >= threshold)
+                        .unwrap_or(false)
+                })
                 .unwrap_or(idx_from_oldest);
         } else {
             idx_from_oldest = (0..idx_from_oldest)
                 .rev()
-                .find(|&i| data.get(i).copied().unwrap_or(0) >= threshold)
+                .find(|&i| {
+                    data.get(i)
+                        .map(|b| b.info + b.warn + b.error >= threshold)
+                        .unwrap_or(false)
+                })
                 .unwrap_or(idx_from_oldest);
         }
         let new_cursor_from_end = len.saturating_sub(idx_from_oldest + 1);

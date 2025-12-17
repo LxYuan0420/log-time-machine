@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local};
 use rand::{rngs::SmallRng, Rng};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -34,7 +35,25 @@ pub struct LogEntry {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct JsonLog {
+    #[serde(default)]
+    timestamp: Option<String>,
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    msg: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
 pub fn parse_line(line: &str) -> LogEntry {
+    if let Some(entry) = parse_json_log(line) {
+        return entry;
+    }
+
     let mut parts = line.split_whitespace();
     let timestamp = parts
         .next()
@@ -61,6 +80,38 @@ pub fn parse_line(line: &str) -> LogEntry {
         target,
         message,
     }
+}
+
+fn parse_json_log(line: &str) -> Option<LogEntry> {
+    let json: JsonLog = serde_json::from_str(line).ok()?;
+    let timestamp = json
+        .timestamp
+        .as_deref()
+        .or(json.msg.as_deref())
+        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+        .map(|dt| dt.with_timezone(&Local))
+        .unwrap_or_else(Local::now);
+    let level = json
+        .level
+        .as_deref()
+        .and_then(|lvl| match lvl.to_ascii_uppercase().as_str() {
+            "INFO" => Some(Level::Info),
+            "WARN" | "WARNING" => Some(Level::Warn),
+            "ERROR" | "ERR" | "FATAL" => Some(Level::Error),
+            _ => None,
+        })
+        .unwrap_or(Level::Info);
+    let target = json.target.unwrap_or_else(|| "log".to_string());
+    let message = json
+        .message
+        .or(json.msg)
+        .unwrap_or_else(|| "<missing>".to_string());
+    Some(LogEntry {
+        timestamp,
+        level,
+        target,
+        message,
+    })
 }
 
 pub fn fake_entry(rng: &mut SmallRng) -> LogEntry {

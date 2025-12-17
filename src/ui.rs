@@ -116,8 +116,12 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
-    let data: Vec<u64> = app.timeline().data();
-    let max_value = data.iter().copied().max().unwrap_or(1);
+    let data = app.timeline().data();
+    let max_value = data
+        .iter()
+        .map(|b| b.info + b.warn + b.error)
+        .max()
+        .unwrap_or(1);
     let (start, end) = app.timeline().range();
     let cursor_text = app.timeline_cursor_from_end().map(|cursor| {
         let len = app.timeline().len();
@@ -140,9 +144,10 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         ])
         .split(area);
 
+    let combined: Vec<u64> = data.iter().map(|b| b.info + b.warn + b.error).collect();
     let sparkline = Sparkline::default()
         .block(Block::default().title(title).borders(Borders::ALL))
-        .data(&data)
+        .data(&combined)
         .max(max_value)
         .style(Style::default().fg(Color::Cyan));
     frame.render_widget(sparkline, parts[0]);

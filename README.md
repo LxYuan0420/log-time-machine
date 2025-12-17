@@ -11,6 +11,7 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Bookmarks: `b` add, `]`/`[` next/prev
 - Diff stub: `A`/`B` set range markers; counts show in status
 - Help overlay: `?` to toggle; timeline shows cursor/bookmark/diff markers
+- Config: optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>`
 
 ## Run it
 - Mock feed: `cargo run` or `make run-mock`

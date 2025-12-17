@@ -12,10 +12,11 @@ use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::{Args, SourceConfig, TICK_RATE};
+use crate::config::{AppConfig, Args, SourceConfig, TICK_RATE};
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let app_cfg = AppConfig::load(&args);
     let source = if args.stdin {
         SourceConfig::Stdin
     } else if let Some(file) = args.file {
@@ -25,7 +26,7 @@ fn main() -> Result<()> {
     };
 
     let ingest = ingest::Ingest::new(source.clone());
-    let mut app = app::App::new(ingest, args.max_lines, source.label());
+    let mut app = app::App::new(ingest, app_cfg.max_lines, source.label());
 
     let mut terminal = ui::setup_terminal()?;
     let result = run(&mut terminal, &mut app);

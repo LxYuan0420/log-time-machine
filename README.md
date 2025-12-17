@@ -17,6 +17,7 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Mock feed: `cargo run` or `make run-mock`
 - Tail a file: `make run-sample` or `cargo run -- --file samples/sample.log`
 - Tail stdin: `cat samples/sample.log | cargo run -- --stdin`
+- Generate a live file: one shell `bash scripts/mock_log_stream.sh /tmp/logtm_live.log`; another `PATH="$HOME/.cargo/bin:$PATH" cargo run -- --file /tmp/logtm_live.log`
 
 ## Dev
 - `make fmt` / `make check` / `make clippy`

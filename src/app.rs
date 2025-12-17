@@ -121,6 +121,14 @@ impl App {
             self.paused_head_len = None;
             self.timeline_cursor_from_end = None;
         } else {
+            if let Some(prev) = self.paused_head_len {
+                let added = self.logs.len().saturating_sub(prev);
+                if added > 0 {
+                    self.scroll_offset += added;
+                    self.selected_from_end += added;
+                    self.paused_head_len = Some(self.logs.len());
+                }
+            }
             self.clamp_selection();
         }
         self.last_tick = Instant::now();
@@ -227,6 +235,7 @@ impl App {
         self.filters = Filters::default();
         self.filter_error = None;
         self.after_filter_change();
+        self.last_notice = Some("Filters cleared".to_string());
     }
 
     pub fn jump_error(&mut self, direction: i32) {
@@ -371,13 +380,25 @@ impl App {
     pub fn set_diff_a(&mut self) {
         if let Some(entry) = self.current_entry() {
             self.diff_a = Some(entry.timestamp);
+            self.last_notice = Some("Set marker A".to_string());
+        } else {
+            self.last_notice = Some("No entry to mark as A".to_string());
         }
     }
 
     pub fn set_diff_b(&mut self) {
         if let Some(entry) = self.current_entry() {
             self.diff_b = Some(entry.timestamp);
+            self.last_notice = Some("Set marker B".to_string());
+        } else {
+            self.last_notice = Some("No entry to mark as B".to_string());
         }
+    }
+
+    pub fn clear_diff(&mut self) {
+        self.diff_a = None;
+        self.diff_b = None;
+        self.last_notice = Some("Cleared diff markers".to_string());
     }
 
     pub fn diff_summary(&self) -> Option<DiffStats> {

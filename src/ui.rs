@@ -58,10 +58,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Line::from(" q/ctrl-c quit | space pause | g/end go live | arrows/pgup/pgdn scroll"),
             Line::from(" left/right timeline | s/S jump spikes"),
             Line::from(
-                " / filter | R toggle regex | F clear | 1/2/3 toggle levels | n/p next/prev error",
+                " / filter | R toggle regex | F/C clear | 1/2/3 toggle levels | n/p next/prev error",
             ),
             Line::from(" b add bookmark | ]/[ next/prev bookmark"),
-            Line::from(" A/B set diff markers | E export diff slice"),
+            Line::from(" A/B set diff markers | X clear diff | E export diff slice"),
             Line::from(""),
             Line::from("While scrolling up we auto-pause; queued lines show as +N."),
             Line::from("Timeline cursor moves with left/right; markers show bookmarks and cursor."),
@@ -87,6 +87,22 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(
             "q: quit  space: pause/resume  arrows: scroll  left/right: timeline  g/end: go live  ?: help",
         ),
+        Line::from(format!(
+            "Filter: {} | Levels: {}{}{}",
+            match &app.filters().text {
+                Some(t) if !t.is_empty() => {
+                    if app.filters().regex_mode {
+                        format!("/{t}/")
+                    } else {
+                        format!("\"{t}\"")
+                    }
+                }
+                _ => "none".to_string(),
+            },
+            if app.filters().info { "I" } else { "i" },
+            if app.filters().warn { "W" } else { "w" },
+            if app.filters().error { "E" } else { "e" },
+        )),
     ])
     .block(
         Block::default()
@@ -301,7 +317,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw(bookmarks),
         Span::raw(" · "),
         Span::raw(
-            "keys: pgup/pgdn scroll, left/right timeline, / filter, F clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, E export",
+            "keys: pgup/pgdn scroll, left/right timeline, / filter, F/C clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, X clear diff, E export",
         ),
     ])];
 

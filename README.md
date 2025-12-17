@@ -7,9 +7,9 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Pause/live: `space`, `g`/`End`
 - Scroll: `Up`/`Down`/`k`/`j`, `PageUp`/`PageDown`, `Home` to top
 - Timeline scrub: `Left`/`Right` to jump across bins; `s`/`S` jump to next/prev spike
-- Filters: `/` to enter text (toggle regex with `R`), `F` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error
+- Filters: `/` to enter text (toggle regex with `R`), `F`/`C` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error
 - Bookmarks: `b` add, `]`/`[` next/prev
-- Diff stub: `A`/`B` set range markers; counts show in status
+- Diff: `A`/`B` set range markers; `X` clears; counts/top targets show in status; `E` exports the filtered slice
 - Help overlay: `?` to toggle; timeline shows cursor/bookmark/diff markers
 - Config: optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>`
 

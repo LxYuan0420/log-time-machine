@@ -6,7 +6,6 @@ on:
 
 jobs:
   lint:
-    if: ${{ false }} # temporarily disabled to avoid CI usage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

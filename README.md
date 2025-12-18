@@ -11,6 +11,7 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 - Built-in mock source so `cargo run` works out of the box; file/stdin tailing for real feeds.
 
 ## Quick start
+- Install: `cargo install ltm`
 - Default mock (no setup): `cargo run`
 - Tail a file: `cargo run -- --file <path-to-your-log>` (e.g., `samples/sample.log`)
 - Tail stdin: `cat <your-log> | cargo run -- --stdin`

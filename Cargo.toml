@@ -1,7 +1,14 @@
 [package]
-name = "log-time-machine"
+name = "ltm"
 version = "0.1.0"
 edition = "2021"
+description = "Terminal log viewer with whole-line filters, bookmarks, timeline scrub, and live tail"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/LxYuan0420/log-time-machine"
+keywords = ["tui", "logs", "terminal", "ratatui"]
+categories = ["command-line-utilities"]
+homepage = "https://github.com/LxYuan0420/log-time-machine"
 
 [dependencies]
 anyhow = "1.0"

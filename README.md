@@ -1,30 +1,30 @@
 # Log Time Machine (Ratatui)
 
-Terminal log viewer focused on fast inspection: tail live logs, pause and scroll without losing lines, see activity spikes, and jump across bookmarks.
+Fast, glanceable terminal log viewer: keep your place while new logs stream in, filter the whole line, and hop through bookmarks without losing context. Built for everyday ops/debugging rather than a toy demo.
 
-## Current controls
+## Features
+- Tail live logs without losing lines: auto-pause when you scroll; resume with space/g.
+- Whole-line filtering with live typing; toggle regex; clear in one keystroke.
+- Level chips (INFO/WARN/ERROR) with strikethrough when disabled.
+- Bookmark jumps with position display; timeline scrub with cursor/bookmark markers.
+- Timeline bands colored by level mix for quick “what’s noisy?” reads.
+- Built-in mock source so `cargo run` works out of the box; file/stdin tailing for real feeds.
+
+## Quick start
+- Default mock (no setup): `cargo run`
+- Tail a file: `cargo run -- --file samples/sample.log`
+- Tail stdin: `cat samples/sample.log | cargo run -- --stdin`
+- Tail a live file you generate: `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
+- Watch the demo (needs `asciinema`): `asciinema play docs/demo.cast`
+
+## Controls (in-app command bar)
 - Quit: `q` / `Ctrl-C`
 - Pause/live: `space`, `g`/`End`
-- Scroll: `Up`/`Down`/`k`/`j`, `PageUp`/`PageDown`, `Home` to top
-- Timeline scrub: `Left`/`Right` to jump across bins
-- Filters: `/` to enter text (toggle regex with `R`), `F`/`C` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error. Filters match the whole row (timestamp, level, target, message) and show what you type.
-- Bookmarks: `b` add, `]`/`[` next/prev, status shows which bookmark you’re on
-- Timeline colors: red=errors, yellow=warnings, white=info. Markers: `^` cursor, `*` bookmark, `#` cursor+bookmark.
-- Help overlay: `?` to toggle; timeline shows cursor/bookmark markers
-- Config: optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>`
+- Scroll: `Up`/`Down`/`k`/`j`, `PageUp`/`PageDown`, `Home`/`End`
+- Timeline: `Left`/`Right`
+- Filters: `/` to type (filter matches timestamp/level/target/message), `Enter` apply, `Esc` cancel, `F/C` clear, `R` regex, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error
+- Bookmarks: `b` add, `]`/`[` next/prev (status shows which bookmark you’re on)
+- Help: `?`
 
-## Run it
-- Mock feed (default if no source provided): `cargo run` or `make run-mock`
-- Tail a file: `make run-sample` or `cargo run -- --file samples/sample.log`
-- Tail stdin: `cat samples/sample.log | cargo run -- --stdin`
-- Generate a live file: one shell `bash scripts/mock_log_stream.sh /tmp/logtm_live.log`; another `cargo run -- --file /tmp/logtm_live.log` (or one-liner: `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`)
-- Replay the demo: `asciinema play docs/demo.cast` (cast recorded from the built-in mock run)
-
-## Dev
-- `make fmt` / `make check` / `make clippy`
-- Code lives in `src/main.rs`; sample log at `samples/sample.log`.
-
-## Roadmap (tracked in GitHub issues)
-- Timeline cursor UI polish and bookmark markers
-- Filter polish and saved presets
-- Test coverage and CI (fmt/clippy)
+## Configuration
+Optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>` to cap retained lines. Defaults keep memory bounded.

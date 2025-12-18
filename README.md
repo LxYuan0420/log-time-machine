@@ -14,10 +14,11 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Config: optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>`
 
 ## Run it
-- Mock feed: `cargo run` or `make run-mock`
+- Mock feed (default if no source provided): `cargo run` or `make run-mock`
 - Tail a file: `make run-sample` or `cargo run -- --file samples/sample.log`
 - Tail stdin: `cat samples/sample.log | cargo run -- --stdin`
-- Generate a live file: one shell `bash scripts/mock_log_stream.sh /tmp/logtm_live.log`; another `PATH="$HOME/.cargo/bin:$PATH" cargo run -- --file /tmp/logtm_live.log`
+- Generate a live file: one shell `bash scripts/mock_log_stream.sh /tmp/logtm_live.log`; another `cargo run -- --file /tmp/logtm_live.log` (or one-liner: `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`)
+- Replay the demo: `asciinema play docs/demo.cast` (cast recorded from the built-in mock run)
 
 ## Dev
 - `make fmt` / `make check` / `make clippy`

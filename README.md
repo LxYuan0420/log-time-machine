@@ -19,10 +19,8 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 - Generate and view a live file (script produces the stream, TUI tails it): `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
 
 <a href="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk" target="_blank">
-  <img src="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk.svg" alt="asciicast" width="400"/>
+  <img src="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk.svg" alt="asciicast" width="640"/>
 </a>
-
-![LTM screenshot](docs/screenshot.png)
 
 ## Controls (in-app command bar)
 - Quit: `q` / `Ctrl-C`
@@ -35,3 +33,5 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 
 ## Configuration
 Optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>` to cap retained lines. Defaults keep memory bounded.
+
+![LTM screenshot](docs/screenshot.png)

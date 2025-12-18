@@ -12,10 +12,9 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 
 ## Quick start
 - Default mock (no setup): `cargo run`
-- Tail a file: `cargo run -- --file samples/sample.log`
-- Tail stdin: `cat samples/sample.log | cargo run -- --stdin`
-- Tail a live file you generate: `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
-- Watch the demo (needs `asciinema`): `asciinema play docs/demo.cast`
+- Tail a file: `cargo run -- --file <path-to-your-log>` (e.g., `samples/sample.log`)
+- Tail stdin: `cat <your-log> | cargo run -- --stdin`
+- Generate and view a live file (script produces the stream, TUI tails it): `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
 
 ## Controls (in-app command bar)
 - Quit: `q` / `Ctrl-C`

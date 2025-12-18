@@ -22,6 +22,8 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
   <img src="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk.svg" alt="asciicast" width="400"/>
 </a>
 
+![LTM screenshot](docs/screenshot.png)
+
 ## Controls (in-app command bar)
 - Quit: `q` / `Ctrl-C`
 - Pause/live: `space`, `g`/`End`

@@ -88,7 +88,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             "q: quit  space: pause/resume  arrows: scroll  left/right: timeline  g/end: go live  ?: help",
         ),
         Line::from(format!(
-            "Filter: {} | Levels: {}{}{}",
+            "Filter: {} | Levels: {}{}{} | Mode: {}",
             match &app.filters().text {
                 Some(t) if !t.is_empty() => {
                     if app.filters().regex_mode {
@@ -102,13 +102,11 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             if app.filters().info { "I" } else { "i" },
             if app.filters().warn { "W" } else { "w" },
             if app.filters().error { "E" } else { "e" },
-        )),
-        match app.input_mode() {
-            crate::filters::InputMode::FilterText(buf) => {
-                Line::from(format!("Typing filter: {buf}_ (Enter apply, Esc cancel)"))
+            match app.input_mode() {
+                crate::filters::InputMode::FilterText(buf) => format!("typing `{buf}_` (Enter/Esc)"),
+                crate::filters::InputMode::Normal => "normal".to_string(),
             }
-            crate::filters::InputMode::Normal => Line::from(""),
-        },
+        )),
     ])
     .block(
         Block::default()
@@ -323,7 +321,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw(bookmarks),
         Span::raw(" · "),
         Span::raw(
-            "keys: pgup/pgdn scroll, left/right timeline, / filter, F/C clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, X clear diff, E export",
+            "keys: pgup/pgdn scroll, left/right timeline, / filter, F/C clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, X clear diff, E export, space pause",
         ),
     ])];
 

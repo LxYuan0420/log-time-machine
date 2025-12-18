@@ -35,29 +35,30 @@ impl Filters {
         if !level_ok {
             return false;
         }
-        if let Some(ref text) = self.text {
-            if text.is_empty() {
-                return true;
-            }
-            if self.regex_mode {
-                if let Some(re) = &self.compiled {
-                    return re.is_match(&entry.message);
-                }
-                return true;
-            }
-            let needle = text.to_lowercase();
-            entry.message.to_lowercase().contains(&needle)
-                || entry.target.to_lowercase().contains(&needle)
-                || entry.level.label().to_lowercase().contains(&needle)
-                || entry
-                    .timestamp
-                    .format("%Y-%m-%dT%H:%M:%S")
-                    .to_string()
-                    .to_lowercase()
-                    .contains(&needle)
-        } else {
-            true
+        let Some(ref text) = self.text else {
+            return true;
+        };
+        if text.is_empty() {
+            return true;
         }
+
+        let haystack = format!(
+            "{} {} {} {}",
+            entry.timestamp.format("%Y-%m-%dT%H:%M:%S"),
+            entry.level.label(),
+            entry.target,
+            entry.message
+        );
+
+        if self.regex_mode {
+            if let Some(re) = &self.compiled {
+                return re.is_match(&haystack);
+            }
+            return true;
+        }
+
+        let needle = text.to_lowercase();
+        haystack.to_lowercase().contains(&needle)
     }
 
     pub fn set_text(&mut self, text: Option<String>) -> Result<(), regex::Error> {
@@ -89,18 +90,44 @@ mod tests {
     use chrono::Local;
 
     #[test]
-    fn filters_support_regex() {
+    fn filters_support_regex_across_fields() {
         let entry = LogEntry {
             timestamp: Local::now(),
-            level: Level::Error,
-            target: "db".to_string(),
-            message: "deadlock retry txn=7 attempt=1".to_string(),
+            level: Level::Warn,
+            target: "api".to_string(),
+            message: "timeout while calling upstream".to_string(),
         };
         let mut filters = Filters::default();
         filters.regex_mode = true;
         filters
-            .set_text(Some("deadlock.*txn=7".to_string()))
+            .set_text(Some("WARN.*api.*timeout".to_string()))
             .unwrap();
+        assert!(filters.matches(&entry));
+    }
+
+    #[test]
+    fn filters_match_all_fields_with_text() {
+        let entry = LogEntry {
+            timestamp: Local::now(),
+            level: Level::Info,
+            target: "ingest".to_string(),
+            message: "ingest worker started".to_string(),
+        };
+        let mut filters = Filters::default();
+        filters.set_text(Some("ingest worker".to_string())).unwrap();
+        assert!(filters.matches(&entry));
+    }
+
+    #[test]
+    fn filters_match_timestamp_and_level() {
+        let entry = LogEntry {
+            timestamp: Local::now(),
+            level: Level::Error,
+            target: "db".to_string(),
+            message: "failed to commit".to_string(),
+        };
+        let mut filters = Filters::default();
+        filters.set_text(Some("error db".to_string())).unwrap();
         assert!(filters.matches(&entry));
     }
 }

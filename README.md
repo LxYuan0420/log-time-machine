@@ -1,16 +1,16 @@
 # Log Time Machine (Ratatui)
 
-Terminal log viewer focused on fast inspection: tail live logs, pause and scroll without losing lines, see activity spikes, and eventually bookmark/diff periods.
+Terminal log viewer focused on fast inspection: tail live logs, pause and scroll without losing lines, see activity spikes, and jump across bookmarks.
 
 ## Current controls
 - Quit: `q` / `Ctrl-C`
 - Pause/live: `space`, `g`/`End`
 - Scroll: `Up`/`Down`/`k`/`j`, `PageUp`/`PageDown`, `Home` to top
-- Timeline scrub: `Left`/`Right` to jump across bins; `s`/`S` jump to next/prev spike
-- Filters: `/` to enter text (toggle regex with `R`), `F`/`C` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error
-- Bookmarks: `b` add, `]`/`[` next/prev
-- Diff: `A`/`B` set range markers; `X` clears; counts/top targets show in status; `E` exports the filtered slice
-- Help overlay: `?` to toggle; timeline shows cursor/bookmark/diff markers
+- Timeline scrub: `Left`/`Right` to jump across bins
+- Filters: `/` to enter text (toggle regex with `R`), `F`/`C` clears, `1/2/3` toggle INFO/WARN/ERROR, `n/p` next/prev error. Filters match the whole row (timestamp, level, target, message) and show what you type.
+- Bookmarks: `b` add, `]`/`[` next/prev, status shows which bookmark you’re on
+- Timeline colors: red=errors, yellow=warnings, white=info. Markers: `^` cursor, `*` bookmark, `#` cursor+bookmark.
+- Help overlay: `?` to toggle; timeline shows cursor/bookmark markers
 - Config: optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>`
 
 ## Run it
@@ -24,6 +24,6 @@ Terminal log viewer focused on fast inspection: tail live logs, pause and scroll
 - Code lives in `src/main.rs`; sample log at `samples/sample.log`.
 
 ## Roadmap (tracked in GitHub issues)
-- Timeline cursor UI polish and bookmark marks over the timeline
-- Richer diff view and export
+- Timeline cursor UI polish and bookmark markers
+- Filter polish and saved presets
 - Test coverage and CI (fmt/clippy)

@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Sparkline},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Sparkline, Wrap},
     Frame, Terminal,
 };
 
@@ -41,7 +41,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Constraint::Length(3),
             Constraint::Min(10),
             Constraint::Length(4),
-            Constraint::Length(2),
+            Constraint::Length(8),
         ])
         .split(frame.size());
 
@@ -55,13 +55,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
         frame.render_widget(Clear, area);
         let help = Paragraph::new(vec![
             Line::from("Keys:"),
-            Line::from(" q/ctrl-c quit | space pause | g/end go live | arrows/pgup/pgdn scroll"),
-            Line::from(" left/right timeline | s/S jump spikes"),
-            Line::from(
-                " / filter | R toggle regex | F/C clear | 1/2/3 toggle levels | n/p next/prev error",
-            ),
+            Line::from(" q/ctrl-c quit | space pause/resume | g/end go live"),
+            Line::from(" arrows/pgup/pgdn scroll | left/right timeline"),
+            Line::from(" / filter (Enter apply, Esc cancel) | R toggle regex | F/C clear"),
+            Line::from(" 1=info 2=warn 3=error level toggles | n/p next/prev error"),
             Line::from(" b add bookmark | ]/[ next/prev bookmark"),
-            Line::from(" A/B set diff markers | X clear diff | E export diff slice"),
+            Line::from(" Filters match level/target/timestamp/message."),
+            Line::from(
+                " Timeline: red=error, yellow=warn, white=info; ^ cursor, * bookmark, # overlap.",
+            ),
             Line::from(""),
             Line::from("While scrolling up we auto-pause; queued lines show as +N."),
             Line::from("Timeline cursor moves with left/right; markers show bookmarks and cursor."),
@@ -78,34 +80,68 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
+    let filter_display = match &app.filters().text {
+        Some(t) if !t.is_empty() => {
+            if app.filters().regex_mode {
+                format!("/{t}/")
+            } else {
+                format!("\"{t}\"")
+            }
+        }
+        _ => "none".to_string(),
+    };
+    let level_display = format!(
+        "1={}  2={}  3={}",
+        if app.filters().info { "INFO" } else { "info" },
+        if app.filters().warn { "WARN" } else { "warn" },
+        if app.filters().error {
+            "ERROR"
+        } else {
+            "error"
+        },
+    );
+    let input_status = match app.input_mode() {
+        crate::filters::InputMode::FilterText(buf) => {
+            format!("typing: {buf}_ (Enter apply, Esc cancel)")
+        }
+        crate::filters::InputMode::Normal => "normal".to_string(),
+    };
+    let queued = app.queued_len();
+    let timeline_hint = app.timeline_cursor_from_end().map_or_else(
+        || "timeline: live (left/right to scrub)".to_string(),
+        |cursor| {
+            let len = app.timeline().len();
+            let idx_from_oldest = len.saturating_sub(cursor + 1);
+            let position = if idx_from_oldest == 0 {
+                "at oldest"
+            } else if idx_from_oldest + 1 == len {
+                "at newest"
+            } else {
+                "inside range"
+            };
+            format!(
+                "timeline cursor: bin {}/{} ({})",
+                idx_from_oldest + 1,
+                len,
+                position
+            )
+        },
+    );
+
     let header = Paragraph::new(vec![
         Line::from(format!(
-            "Source: {}   Mode: {}",
+            "Source: {}   Mode: {}   Queued: +{}   {}",
             app.source_label(),
-            app.mode.label()
+            app.mode.label(),
+            queued,
+            timeline_hint
         )),
         Line::from(
-            "q: quit  space: pause/resume  arrows: scroll  left/right: timeline  g/end: go live  ?: help",
+            "space pause/resume | arrows/pgup/pgdn scroll | g/end go live | left/right timeline | n/p next/prev error | b add bookmark | ]/[ jump mark | ?: help",
         ),
         Line::from(format!(
-            "Filter: {} | Levels: {}{}{} | Mode: {}",
-            match &app.filters().text {
-                Some(t) if !t.is_empty() => {
-                    if app.filters().regex_mode {
-                        format!("/{t}/")
-                    } else {
-                        format!("\"{t}\"")
-                    }
-                }
-                _ => "none".to_string(),
-            },
-            if app.filters().info { "I" } else { "i" },
-            if app.filters().warn { "W" } else { "w" },
-            if app.filters().error { "E" } else { "e" },
-            match app.input_mode() {
-                crate::filters::InputMode::FilterText(buf) => format!("typing `{buf}_` (Enter/Esc)"),
-                crate::filters::InputMode::Normal => "normal".to_string(),
-            }
+            "Filter (/ start, R regex, F/C clear): {} | Levels: {} | Input: {}",
+            filter_display, level_display, input_status
         )),
     ])
     .block(
@@ -147,7 +183,12 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         let len = app.timeline().len();
         let idx_from_oldest = len.saturating_sub(cursor + 1);
         let ts = app.timeline().bin_start(idx_from_oldest);
-        format!("  cursor: {}", ts.format("%H:%M:%S"))
+        format!(
+            "  cursor: {} (bin {}/{})",
+            ts.format("%H:%M:%S"),
+            idx_from_oldest + 1,
+            len
+        )
     });
     let title = format!(
         "Activity timeline ({} - {}){}",
@@ -159,9 +200,9 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(area.height.saturating_sub(2).max(1)),
+            Constraint::Length(area.height.saturating_sub(3).max(1)),
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(area);
 
@@ -198,20 +239,14 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
-    if let Some(a) = app.diff_a() {
-        if let Some(idx) = app.timeline().bin_index_for(a) {
-            if let Some(slot) = marks.get_mut(idx) {
-                *slot = 'A';
-            }
-        }
-    }
-    if let Some(b) = app.diff_b() {
-        if let Some(idx) = app.timeline().bin_index_for(b) {
-            if let Some(slot) = marks.get_mut(idx) {
-                *slot = 'B';
-            }
-        }
-    }
+    let legend = Line::from(vec![
+        Span::styled(" error", Style::default().bg(Color::Red).fg(Color::Black)),
+        Span::raw(" "),
+        Span::styled(" warn", Style::default().bg(Color::Yellow).fg(Color::Black)),
+        Span::raw(" "),
+        Span::styled(" info", Style::default().bg(Color::White).fg(Color::Black)),
+        Span::raw("   ^ cursor  * bookmark  # cursor+bookmark"),
+    ]);
 
     let marker_str: String = marks.iter().collect();
     let trimmed = if marker_str.len() > parts[2].width as usize {
@@ -222,9 +257,9 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         marker_str
     };
-    let markers = Paragraph::new(trimmed).block(
+    let markers = Paragraph::new(vec![Line::from(trimmed), legend]).block(
         Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+            .borders(Borders::LEFT | Borders::RIGHT)
             .border_style(Style::default().fg(Color::DarkGray)),
     );
     frame.render_widget(markers, parts[2]);
@@ -263,16 +298,7 @@ fn build_band_spans(data: &[crate::timeline::Bin], width: usize) -> Vec<Span<'st
 }
 
 fn render_status(frame: &mut Frame, area: Rect, app: &App) {
-    let queued = app
-        .paused_head_len()
-        .map(|start| app.total_logs().saturating_sub(start))
-        .unwrap_or(0);
-    let levels = format!(
-        "levels: {}{}{}",
-        if app.filters().info { "I" } else { "i" },
-        if app.filters().warn { "W" } else { "w" },
-        if app.filters().error { "E" } else { "e" }
-    );
+    let queued = app.queued_len();
     let filter_text = match &app.filters().text {
         Some(text) if !text.is_empty() => {
             if app.filters().regex_mode {
@@ -284,10 +310,34 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         _ => "filter: none".to_string(),
     };
     let input_hint = match app.input_mode() {
-        crate::filters::InputMode::FilterText(buf) => format!("typing filter: {buf}_"),
-        crate::filters::InputMode::Normal => "".to_string(),
+        crate::filters::InputMode::FilterText(buf) => Some(format!("typing filter: {buf}_")),
+        crate::filters::InputMode::Normal => None,
     };
-    let bookmarks = format!("bookmarks: {}", app.bookmarks().len());
+    let levels = (
+        level_chip("INFO", app.filters().info, Color::White),
+        level_chip("WARN", app.filters().warn, Color::Yellow),
+        level_chip("ERROR", app.filters().error, Color::Red),
+    );
+    let timeline_status = app.timeline_cursor_from_end().map_or_else(
+        || "timeline: live (left/right to scrub)".to_string(),
+        |cursor| {
+            let len = app.timeline().len();
+            let idx_from_oldest = len.saturating_sub(cursor + 1);
+            let position = if idx_from_oldest == 0 {
+                "at oldest"
+            } else if idx_from_oldest + 1 == len {
+                "at newest"
+            } else {
+                "inside range"
+            };
+            format!(
+                "timeline cursor {}/{} ({})",
+                idx_from_oldest + 1,
+                len,
+                position
+            )
+        },
+    );
 
     let mut lines = vec![Line::from(vec![
         Span::styled(
@@ -310,24 +360,91 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
             "live view".to_string()
         }),
         Span::raw(" · "),
-        Span::raw(format!("queued: +{queued}")),
-        Span::raw(" · "),
-        Span::raw(levels),
-        Span::raw(" · "),
-        Span::raw(filter_text),
-        Span::raw(" · "),
-        Span::raw(input_hint),
-        Span::raw(" · "),
-        Span::raw(bookmarks),
-        Span::raw(" · "),
-        Span::raw(
-            "keys: pgup/pgdn scroll, left/right timeline, / filter, F/C clear, R regex, b add mark, ]/[ jump mark, n/p error, s/S spike, A/B diff, X clear diff, E export, space pause",
+        Span::styled(
+            format!("queued: +{queued}"),
+            Style::default().fg(Color::Yellow),
         ),
+        Span::raw(" · "),
+        Span::raw(timeline_status),
     ])];
+    if matches!(app.mode, crate::app::Mode::Paused) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "PAUSED - view frozen; new lines are buffered",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" · press space/g to resume"),
+        ]));
+    }
 
-    if !app.bookmarks().is_empty() {
-        let labels: Vec<String> = app.bookmarks().iter().map(|b| b.label.clone()).collect();
-        lines.push(Line::from(format!("Bookmarks: {}", labels.join(", "))));
+    let filter_spans = {
+        let mut spans = vec![Span::styled(
+            filter_text.clone(),
+            if app.filters().text.is_some() {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        )];
+        if app.filters().text.is_some() {
+            spans.push(Span::raw(" (F/C to clear)"));
+        }
+        spans.push(Span::raw(" · "));
+        spans.push(Span::styled(
+            format!(
+                "regex: {}",
+                if app.filters().regex_mode {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+            if app.filters().regex_mode {
+                Style::default().fg(Color::Magenta)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ));
+        spans.push(Span::raw(" · "));
+        spans.extend_from_slice(&[
+            levels.0.clone(),
+            Span::raw(" "),
+            levels.1.clone(),
+            Span::raw(" "),
+            levels.2.clone(),
+        ]);
+        spans
+    };
+    lines.push(Line::from(filter_spans));
+    let bookmark_line = if let Some((idx, bm)) = app.current_bookmark_position() {
+        format!(
+            "Bookmarks: {} (at {}/{} -> {} @ {})",
+            app.bookmarks().len(),
+            idx + 1,
+            app.bookmarks().len(),
+            bm.label,
+            bm.timestamp.format("%H:%M:%S")
+        )
+    } else {
+        format!(
+            "Bookmarks: {} (b to add, ]/[ to jump)",
+            app.bookmarks().len()
+        )
+    };
+    lines.push(Line::from(bookmark_line));
+    let command_bar = Line::from(vec![
+        Span::styled("Commands: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(
+            "Quit q/ctrl-c | Pause/Live space/g | Scroll \u{2191}/\u{2193}/PgUp/PgDn/Home/End | Timeline \u{2190}/\u{2192} | Filters / type, Enter apply, Esc cancel, F/C clear, R regex | Levels 1/2/3 | Errors n/p | Bookmarks b add, ]/[ jump",
+        ),
+    ]);
+    lines.push(command_bar);
+    if let Some(hint) = input_hint {
+        lines.push(Line::from(format!("Input: {}", hint)));
     }
 
     if let Some(err) = app.filter_error() {
@@ -337,35 +454,6 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         )));
     }
 
-    if let (Some(a), Some(b)) = (app.diff_a(), app.diff_b()) {
-        lines.push(Line::from(format!(
-            "Diff A..B: A={}  B={}",
-            a.format("%H:%M:%S"),
-            b.format("%H:%M:%S")
-        )));
-        if let Some(stats) = app.diff_summary() {
-            let targets = if stats.top_targets.is_empty() {
-                "top targets: (none)".to_string()
-            } else {
-                let joined = stats
-                    .top_targets
-                    .iter()
-                    .map(|(t, c)| format!("{t}({c})"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("top targets: {joined}")
-            };
-            lines.push(Line::from(format!(
-                "Counts in range (filtered): total={} info={} warn={} error={} · {}",
-                stats.total, stats.info, stats.warn, stats.error, targets
-            )));
-        }
-    } else {
-        lines.push(Line::from(
-            "Diff: set with A/B, clear with X, export with E",
-        ));
-    }
-
     if let Some(msg) = app.last_notice() {
         lines.push(Line::from(Span::styled(
             msg.clone(),
@@ -373,11 +461,13 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         )));
     }
 
-    let status = Paragraph::new(lines).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
+    let status = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .wrap(Wrap { trim: true });
     frame.render_widget(status, area);
 }
 
@@ -410,6 +500,14 @@ fn to_list_item(entry: &crate::log_entry::LogEntry, selected: bool) -> ListItem<
         }
     }
     ListItem::new(Line::from(spans))
+}
+
+fn level_chip(label: &str, enabled: bool, color: Color) -> Span<'static> {
+    let mut style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    if !enabled {
+        style = style.add_modifier(Modifier::CROSSED_OUT | Modifier::DIM);
+    }
+    Span::styled(label.to_string(), style)
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    fs,
+    collections::VecDeque,
     time::{Duration, Instant},
 };
 
@@ -42,14 +41,6 @@ pub struct Bookmark {
     pub label: String,
 }
 
-pub struct DiffStats {
-    pub total: usize,
-    pub info: usize,
-    pub warn: usize,
-    pub error: usize,
-    pub top_targets: Vec<(String, usize)>,
-}
-
 pub struct App {
     pub mode: Mode,
     logs: VecDeque<LogEntry>,
@@ -58,6 +49,7 @@ pub struct App {
     scroll_offset: usize,
     selected_from_end: usize,
     paused_head_len: Option<usize>,
+    paused_buffer: Vec<LogEntry>,
     filters: Filters,
     filter_error: Option<String>,
     input_mode: InputMode,
@@ -66,8 +58,6 @@ pub struct App {
     timeline: Timeline,
     source_label: String,
     timeline_cursor_from_end: Option<usize>,
-    diff_a: Option<DateTime<Local>>,
-    diff_b: Option<DateTime<Local>>,
     pub show_help: bool,
     last_tick: Instant,
     last_notice: Option<String>,
@@ -83,6 +73,7 @@ impl App {
             scroll_offset: 0,
             selected_from_end: 0,
             paused_head_len: None,
+            paused_buffer: Vec::new(),
             filters: Filters::default(),
             filter_error: None,
             input_mode: InputMode::Normal,
@@ -91,8 +82,6 @@ impl App {
             timeline: Timeline::new(TIMELINE_BINS, TIMELINE_WINDOW),
             source_label,
             timeline_cursor_from_end: None,
-            diff_a: None,
-            diff_b: None,
             show_help: false,
             last_tick: Instant::now(),
             last_notice: None,
@@ -111,26 +100,24 @@ impl App {
                 Level::Warn => warn += 1,
                 Level::Error => error += 1,
             }
-            self.push_log(entry);
+            if matches!(self.mode, Mode::Paused) {
+                self.paused_buffer.push(entry);
+            } else {
+                self.push_log(entry);
+            }
         }
         self.timeline.record(now, info, warn, error);
-        self.prune(now);
-        if matches!(self.mode, Mode::Live) {
-            self.scroll_offset = 0;
-            self.selected_from_end = 0;
-            self.paused_head_len = None;
-            self.timeline_cursor_from_end = None;
-        } else {
-            if let Some(prev) = self.paused_head_len {
-                let added = self.logs.len().saturating_sub(prev);
-                if added > 0 {
-                    self.scroll_offset += added;
-                    self.selected_from_end += added;
-                    self.paused_head_len = Some(self.logs.len());
-                }
-            }
-            self.clamp_selection();
+        if matches!(self.mode, Mode::Paused) {
+            self.last_tick = Instant::now();
+            return;
         }
+        self.flush_pending();
+        self.prune(now);
+        self.scroll_offset = 0;
+        self.selected_from_end = 0;
+        self.paused_head_len = None;
+        self.timeline_cursor_from_end = None;
+        self.clamp_selection();
         self.last_tick = Instant::now();
     }
 
@@ -146,6 +133,7 @@ impl App {
             }
             Mode::Paused => {
                 self.mode = Mode::Live;
+                self.flush_pending();
                 self.scroll_offset = 0;
                 self.selected_from_end = 0;
                 self.paused_head_len = None;
@@ -156,6 +144,7 @@ impl App {
 
     pub fn go_live(&mut self) {
         self.mode = Mode::Live;
+        self.flush_pending();
         self.scroll_offset = 0;
         self.selected_from_end = 0;
         self.paused_head_len = None;
@@ -291,6 +280,12 @@ impl App {
                 label,
             });
             self.bookmarks.sort_by_key(|b| b.timestamp);
+            if let Some(last) = self.bookmarks.last() {
+                self.last_notice = Some(format!(
+                    "Added bookmark {} @ {}",
+                    last.label, last.timestamp
+                ));
+            }
         }
     }
 
@@ -332,155 +327,8 @@ impl App {
                 if self.paused_head_len.is_none() {
                     self.paused_head_len = Some(self.logs.len());
                 }
+                self.last_notice = Some(format!("Jumped to {}", bm.label));
             }
-        }
-    }
-
-    pub fn jump_spike(&mut self, direction: i32) {
-        let data = self.timeline.data();
-        if data.is_empty() {
-            return;
-        }
-        let max = data
-            .iter()
-            .map(|b| b.info + b.warn + b.error)
-            .max()
-            .unwrap_or(0);
-        let threshold = std::cmp::max(1, (max as f64 * 0.5).ceil() as u64);
-        let len = data.len();
-        let current_cursor = self.timeline_cursor_from_end.unwrap_or(0);
-        let mut idx_from_oldest = len.saturating_sub(current_cursor + 1);
-        if direction > 0 {
-            idx_from_oldest = ((idx_from_oldest + 1)..len)
-                .find(|&i| {
-                    data.get(i)
-                        .map(|b| b.info + b.warn + b.error >= threshold)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(idx_from_oldest);
-        } else {
-            idx_from_oldest = (0..idx_from_oldest)
-                .rev()
-                .find(|&i| {
-                    data.get(i)
-                        .map(|b| b.info + b.warn + b.error >= threshold)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(idx_from_oldest);
-        }
-        let new_cursor_from_end = len.saturating_sub(idx_from_oldest + 1);
-        self.timeline_cursor_from_end = Some(new_cursor_from_end);
-        self.mode = Mode::Paused;
-        if self.paused_head_len.is_none() {
-            self.paused_head_len = Some(self.logs.len());
-        }
-        self.jump_to_timeline_cursor();
-    }
-
-    pub fn set_diff_a(&mut self) {
-        if let Some(entry) = self.current_entry() {
-            self.diff_a = Some(entry.timestamp);
-            self.last_notice = Some("Set marker A".to_string());
-        } else {
-            self.last_notice = Some("No entry to mark as A".to_string());
-        }
-    }
-
-    pub fn set_diff_b(&mut self) {
-        if let Some(entry) = self.current_entry() {
-            self.diff_b = Some(entry.timestamp);
-            self.last_notice = Some("Set marker B".to_string());
-        } else {
-            self.last_notice = Some("No entry to mark as B".to_string());
-        }
-    }
-
-    pub fn clear_diff(&mut self) {
-        if self.diff_a.is_some() || self.diff_b.is_some() {
-            self.diff_a = None;
-            self.diff_b = None;
-            self.last_notice = Some("Cleared diff markers".to_string());
-        } else {
-            self.last_notice = Some("No diff markers to clear".to_string());
-        }
-    }
-
-    pub fn diff_summary(&self) -> Option<DiffStats> {
-        let (a, b) = match (self.diff_a, self.diff_b) {
-            (Some(a), Some(b)) => (a.min(b), a.max(b)),
-            _ => return None,
-        };
-        let mut info = 0;
-        let mut warn = 0;
-        let mut error = 0;
-        let mut targets: HashMap<String, usize> = HashMap::new();
-        let mut total = 0;
-        for entry in self
-            .logs
-            .iter()
-            .filter(|e| e.timestamp >= a && e.timestamp <= b)
-        {
-            if !self.filters.matches(entry) {
-                continue;
-            }
-            total += 1;
-            match entry.level {
-                Level::Info => info += 1,
-                Level::Warn => warn += 1,
-                Level::Error => error += 1,
-            }
-            *targets.entry(entry.target.clone()).or_default() += 1;
-        }
-        let mut top_targets: Vec<(String, usize)> = targets.into_iter().collect();
-        top_targets.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        top_targets.truncate(5);
-        Some(DiffStats {
-            total,
-            info,
-            warn,
-            error,
-            top_targets,
-        })
-    }
-
-    pub fn export_diff(&mut self) {
-        let (a, b) = match (self.diff_a, self.diff_b) {
-            (Some(a), Some(b)) => (a.min(b), a.max(b)),
-            _ => {
-                self.last_notice = Some("Set A and B before exporting".to_string());
-                return;
-            }
-        };
-        let filtered: Vec<&LogEntry> = self
-            .logs
-            .iter()
-            .filter(|e| e.timestamp >= a && e.timestamp <= b)
-            .filter(|e| self.filters.matches(e))
-            .collect();
-        if filtered.is_empty() {
-            self.last_notice = Some("No lines in diff range (after filters)".to_string());
-            return;
-        }
-        let path = format!(
-            "/tmp/logtm_diff_{}.log",
-            Local::now().format("%Y%m%d%H%M%S")
-        );
-        let body = filtered
-            .iter()
-            .map(|e| {
-                format!(
-                    "{} {:5} {:<7} {}",
-                    e.timestamp.to_rfc3339(),
-                    e.level.label(),
-                    e.target,
-                    e.message
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        match fs::write(&path, body) {
-            Ok(_) => self.last_notice = Some(format!("Exported diff slice to {path}")),
-            Err(err) => self.last_notice = Some(format!("Export failed: {err}")),
         }
     }
 
@@ -542,16 +390,15 @@ impl App {
         &self.timeline
     }
 
-    pub fn diff_a(&self) -> Option<DateTime<Local>> {
-        self.diff_a
-    }
-
-    pub fn diff_b(&self) -> Option<DateTime<Local>> {
-        self.diff_b
-    }
-
-    pub fn paused_head_len(&self) -> Option<usize> {
+    pub fn queued_len(&self) -> usize {
         self.paused_head_len
+            .map(|head| {
+                self.logs
+                    .len()
+                    .saturating_sub(head)
+                    .saturating_add(self.paused_buffer.len())
+            })
+            .unwrap_or(0)
     }
 
     pub fn total_logs(&self) -> usize {
@@ -568,6 +415,19 @@ impl App {
 
     pub fn last_notice(&self) -> Option<&String> {
         self.last_notice.as_ref()
+    }
+
+    pub fn current_bookmark_position(&self) -> Option<(usize, &Bookmark)> {
+        let entry_ts = self.current_entry()?.timestamp;
+        let mut candidate: Option<(usize, &Bookmark)> = None;
+        for (idx, bm) in self.bookmarks.iter().enumerate() {
+            if bm.timestamp <= entry_ts {
+                candidate = Some((idx, bm));
+            } else {
+                break;
+            }
+        }
+        candidate.or_else(|| self.bookmarks.first().map(|bm| (0, bm)))
     }
 
     pub fn input_mode_mut(&mut self) -> &mut InputMode {
@@ -655,6 +515,16 @@ impl App {
         let total = filtered.len();
         let target_idx = total.saturating_sub(self.selected_from_end + 1);
         filtered.get(target_idx).and_then(|idx| self.logs.get(*idx))
+    }
+
+    fn flush_pending(&mut self) {
+        if self.paused_buffer.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.paused_buffer);
+        for entry in pending {
+            self.push_log(entry);
+        }
     }
 
     fn push_log(&mut self, entry: LogEntry) {

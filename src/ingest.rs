@@ -54,21 +54,21 @@ impl From<&File> for FileId {
         let meta = value.metadata().expect("metadata");
         #[cfg(unix)]
         {
-            return FileId {
+            FileId {
                 dev: meta.dev(),
                 ino: meta.ino(),
-            };
+            }
         }
         #[cfg(windows)]
         {
-            return FileId {
+            FileId {
                 volume: meta.volume_serial_number().unwrap_or_default(),
                 file_index: meta.file_index().unwrap_or_default(),
-            };
+            }
         }
         #[cfg(not(any(unix, windows)))]
         {
-            return FileId { len: meta.len() };
+            FileId { len: meta.len() }
         }
     }
 }
@@ -78,15 +78,15 @@ impl FileId {
         let other_id = FileId::from(other);
         #[cfg(unix)]
         {
-            return self.dev == other_id.dev && self.ino == other_id.ino;
+            self.dev == other_id.dev && self.ino == other_id.ino
         }
         #[cfg(windows)]
         {
-            return self.volume == other_id.volume && self.file_index == other_id.file_index;
+            self.volume == other_id.volume && self.file_index == other_id.file_index
         }
         #[cfg(not(any(unix, windows)))]
         {
-            return self.len == other_id.len;
+            self.len == other_id.len
         }
     }
 }

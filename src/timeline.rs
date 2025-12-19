@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct Timeline {
@@ -9,7 +10,7 @@ pub struct Timeline {
     last_bin_start: DateTime<Local>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Bin {
     pub info: u64,
     pub warn: u64,

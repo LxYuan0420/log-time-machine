@@ -1,4 +1,5 @@
 mod app;
+mod baseline;
 mod config;
 mod filters;
 mod ingest;
@@ -12,7 +13,7 @@ use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::{AppConfig, Args, SourceConfig, TICK_RATE};
+use crate::config::{AppConfig, Args, SourceConfig, TailStart, TICK_RATE};
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -20,17 +21,30 @@ fn main() -> Result<()> {
     let source = if args.stdin {
         SourceConfig::Stdin
     } else if let Some(file) = args.file {
-        SourceConfig::File(file)
+        SourceConfig::File {
+            path: file,
+            start: TailStart::End,
+        }
     } else {
         SourceConfig::Mock
     };
 
     let ingest = ingest::Ingest::new(source.clone());
-    let mut app = app::App::new(ingest, app_cfg.max_lines, source.label());
+    let mut app = app::App::new(
+        ingest,
+        app_cfg.max_lines,
+        source.label(),
+        app_cfg.baseline.clone(),
+    );
 
     let mut terminal = ui::setup_terminal()?;
     let result = run(&mut terminal, &mut app);
     ui::restore_terminal(&mut terminal)?;
+    if result.is_ok() {
+        if let Some(path) = app.baseline_target() {
+            app.save_baseline(path)?;
+        }
+    }
     result
 }
 

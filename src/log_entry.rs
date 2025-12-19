@@ -40,6 +40,10 @@ struct JsonLog {
     #[serde(default)]
     timestamp: Option<String>,
     #[serde(default)]
+    ts: Option<String>,
+    #[serde(default)]
+    time: Option<String>,
+    #[serde(default)]
     level: Option<String>,
     #[serde(default)]
     target: Option<String>,
@@ -87,7 +91,8 @@ fn parse_json_log(line: &str) -> Option<LogEntry> {
     let timestamp = json
         .timestamp
         .as_deref()
-        .or(json.msg.as_deref())
+        .or(json.ts.as_deref())
+        .or(json.time.as_deref())
         .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
         .map(|dt| dt.with_timezone(&Local))
         .unwrap_or_else(Local::now);
@@ -170,5 +175,17 @@ mod tests {
         assert_eq!(entry.level, Level::Error);
         assert_eq!(entry.target, "db");
         assert!(entry.message.contains("deadlock"));
+    }
+
+    #[test]
+    fn json_parser_ignores_message_for_timestamp() {
+        let before = Local::now();
+        let entry = parse_line(r#"{"level":"warn","target":"api","msg":"hello world"}"#);
+        let after = Local::now();
+        assert_eq!(entry.level, Level::Warn);
+        assert_eq!(entry.target, "api");
+        assert_eq!(entry.message, "hello world");
+        // Timestamp should fall within the parse window (i.e., defaulted to now)
+        assert!(entry.timestamp >= before && entry.timestamp <= after);
     }
 }

@@ -1,12 +1,14 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Local};
 
 use crate::{
-    config::{DEFAULT_MAX_AGE, TIMELINE_BINS, TIMELINE_WINDOW},
+    baseline::{BaselineProfile, TokenCount},
+    config::{BaselineMode, DEFAULT_MAX_AGE, TIMELINE_BINS, TIMELINE_WINDOW},
     filters::{Filters, InputMode},
     ingest::{drain_ingest, Ingest},
     log_entry::{Level, LogEntry},
@@ -49,7 +51,7 @@ pub struct App {
     scroll_offset: usize,
     selected_from_end: usize,
     paused_head_len: Option<usize>,
-    paused_buffer: Vec<LogEntry>,
+    paused_buffer: VecDeque<LogEntry>,
     filters: Filters,
     filter_error: Option<String>,
     input_mode: InputMode,
@@ -61,10 +63,49 @@ pub struct App {
     pub show_help: bool,
     last_tick: Instant,
     last_notice: Option<String>,
+    baseline_mode: BaselineMode,
+    baseline_profile: Option<BaselineProfile>,
+    baseline_target: Option<PathBuf>,
+    token_counts: HashMap<String, u64>,
 }
 
+const TOKEN_TRACK_LIMIT: usize = 4096;
+
 impl App {
-    pub fn new(ingest: Ingest, max_lines: usize, source_label: String) -> Self {
+    pub fn new(
+        ingest: Ingest,
+        max_lines: usize,
+        source_label: String,
+        baseline_mode: BaselineMode,
+    ) -> Self {
+        let baseline_target = match &baseline_mode {
+            BaselineMode::Record(path) => Some(path.clone()),
+            _ => None,
+        };
+        let mut baseline_profile = None;
+        let mut last_notice = None;
+        if let BaselineMode::Compare(path) = &baseline_mode {
+            match BaselineProfile::load(path) {
+                Ok(profile) => {
+                    let incompatible = profile.bin_count != TIMELINE_BINS
+                        || profile.window_secs != TIMELINE_WINDOW.as_secs();
+                    if incompatible {
+                        last_notice = Some(format!(
+                            "Baseline {} incompatible with current window/bins",
+                            path.display()
+                        ));
+                    }
+                    baseline_profile = Some(profile);
+                }
+                Err(err) => {
+                    last_notice = Some(format!(
+                        "Failed to load baseline {}: {}",
+                        path.display(),
+                        err
+                    ));
+                }
+            }
+        }
         Self {
             mode: Mode::Live,
             logs: VecDeque::with_capacity(max_lines),
@@ -73,7 +114,7 @@ impl App {
             scroll_offset: 0,
             selected_from_end: 0,
             paused_head_len: None,
-            paused_buffer: Vec::new(),
+            paused_buffer: VecDeque::new(),
             filters: Filters::default(),
             filter_error: None,
             input_mode: InputMode::Normal,
@@ -84,7 +125,11 @@ impl App {
             timeline_cursor_from_end: None,
             show_help: false,
             last_tick: Instant::now(),
-            last_notice: None,
+            last_notice,
+            baseline_mode,
+            baseline_profile,
+            baseline_target,
+            token_counts: HashMap::new(),
         }
     }
 
@@ -100,11 +145,11 @@ impl App {
                 Level::Warn => warn += 1,
                 Level::Error => error += 1,
             }
-            if matches!(self.mode, Mode::Paused) {
-                self.paused_buffer.push(entry);
-            } else {
-                self.push_log(entry);
-            }
+            self.record_tokens(&entry);
+            match self.mode {
+                Mode::Paused => self.push_paused_entry(entry, now),
+                Mode::Live => self.push_log(entry),
+            };
         }
         self.timeline.record(now, info, warn, error);
         if matches!(self.mode, Mode::Paused) {
@@ -417,6 +462,52 @@ impl App {
         self.last_notice.as_ref()
     }
 
+    pub fn baseline_mode(&self) -> &BaselineMode {
+        &self.baseline_mode
+    }
+
+    pub fn baseline_overlay(&self) -> Option<&BaselineProfile> {
+        let profile = self.baseline_profile.as_ref()?;
+        if profile.bin_count != self.timeline.len()
+            || profile.window_secs != TIMELINE_WINDOW.as_secs()
+        {
+            return None;
+        }
+        Some(profile)
+    }
+
+    pub fn baseline_target(&self) -> Option<&PathBuf> {
+        self.baseline_target.as_ref()
+    }
+
+    pub fn save_baseline(&self, path: &Path) -> anyhow::Result<()> {
+        let profile = self.build_baseline_profile();
+        profile.save(path)
+    }
+
+    pub fn drift_bins(&self) -> Option<Vec<bool>> {
+        let baseline = self.baseline_overlay()?;
+        let current = self.timeline.data();
+        if baseline.bins.len() != current.len() {
+            return None;
+        }
+        Some(
+            current
+                .iter()
+                .zip(baseline.bins.iter())
+                .map(|(cur, base)| is_drift(cur, base))
+                .collect(),
+        )
+    }
+
+    pub fn top_tokens_now(&self, limit: usize) -> Vec<TokenCount> {
+        top_tokens_from_map(&self.token_counts, limit)
+    }
+
+    pub fn baseline_tokens(&self) -> Option<&Vec<TokenCount>> {
+        self.baseline_overlay().map(|b| &b.top_tokens)
+    }
+
     pub fn current_bookmark_position(&self) -> Option<(usize, &Bookmark)> {
         let entry_ts = self.current_entry()?.timestamp;
         let mut candidate: Option<(usize, &Bookmark)> = None;
@@ -521,9 +612,37 @@ impl App {
         if self.paused_buffer.is_empty() {
             return;
         }
-        let pending = std::mem::take(&mut self.paused_buffer);
-        for entry in pending {
+        while let Some(entry) = self.paused_buffer.pop_front() {
             self.push_log(entry);
+        }
+    }
+
+    fn push_paused_entry(&mut self, entry: LogEntry, now: DateTime<Local>) {
+        self.paused_buffer.push_back(entry);
+        self.prune_paused(now);
+    }
+
+    fn prune_paused(&mut self, now: DateTime<Local>) {
+        while let Some(front) = self.paused_buffer.front() {
+            if now
+                .signed_duration_since(front.timestamp)
+                .to_std()
+                .unwrap_or_default()
+                > self.max_age
+            {
+                self.paused_buffer.pop_front();
+            } else {
+                break;
+            }
+        }
+        let allowed = self.max_lines.saturating_sub(self.logs.len());
+        if allowed == 0 {
+            self.paused_buffer.clear();
+            return;
+        }
+        let excess = self.paused_buffer.len().saturating_sub(allowed);
+        for _ in 0..excess {
+            self.paused_buffer.pop_front();
         }
     }
 
@@ -550,5 +669,114 @@ impl App {
         while self.logs.len() > self.max_lines {
             self.logs.pop_front();
         }
+    }
+
+    fn build_baseline_profile(&self) -> BaselineProfile {
+        let bins = self.timeline.data();
+        let tokens = self.top_tokens_now(12);
+        BaselineProfile::new(self.timeline.len(), TIMELINE_WINDOW.as_secs(), bins, tokens)
+    }
+
+    fn record_tokens(&mut self, entry: &LogEntry) {
+        for raw in entry
+            .message
+            .split(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+        {
+            let token = raw.trim().to_ascii_lowercase();
+            if token.len() < 3 {
+                continue;
+            }
+            *self.token_counts.entry(token).or_insert(0) += 1;
+        }
+        prune_token_counts(&mut self.token_counts, TOKEN_TRACK_LIMIT);
+    }
+}
+
+fn is_drift(current: &crate::timeline::Bin, baseline: &crate::timeline::Bin) -> bool {
+    let cur_total = current.info + current.warn + current.error;
+    let base_total = baseline.info + baseline.warn + baseline.error;
+    if cur_total == 0 && base_total == 0 {
+        return false;
+    }
+    if base_total == 0 {
+        return cur_total > 0;
+    }
+    let ratio = cur_total as f64 / base_total as f64;
+    ratio >= 1.8 || (current.error > baseline.error.saturating_mul(2) && current.error > 0)
+}
+
+fn top_tokens_from_map(map: &HashMap<String, u64>, limit: usize) -> Vec<TokenCount> {
+    let mut counts: Vec<_> = map.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    counts
+        .into_iter()
+        .take(limit)
+        .map(|(token, count)| TokenCount { token, count })
+        .collect()
+}
+
+fn prune_token_counts(map: &mut HashMap<String, u64>, limit: usize) {
+    if map.len() <= limit {
+        return;
+    }
+    let mut entries: Vec<_> = map.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    entries.sort_by_key(|(_, v)| *v);
+    let mut to_remove = map.len().saturating_sub(limit);
+    for (token, _) in entries {
+        if to_remove == 0 {
+            break;
+        }
+        map.remove(&token);
+        to_remove -= 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BaselineMode;
+    use rand::SeedableRng;
+
+    fn base_entry() -> LogEntry {
+        LogEntry {
+            timestamp: Local::now(),
+            level: Level::Info,
+            target: "test".to_string(),
+            message: "msg".to_string(),
+        }
+    }
+
+    #[test]
+    fn paused_buffer_respects_max_lines() {
+        let ingest = Ingest::Mock(rand::rngs::SmallRng::seed_from_u64(1));
+        let mut app = App::new(ingest, 5, "mock".to_string(), BaselineMode::Off);
+        app.mode = Mode::Paused;
+        for _ in 0..10 {
+            app.push_paused_entry(base_entry(), Local::now());
+        }
+        assert!(app.paused_buffer.len() <= 5);
+    }
+
+    #[test]
+    fn paused_buffer_drops_old_entries() {
+        let ingest = Ingest::Mock(rand::rngs::SmallRng::seed_from_u64(2));
+        let mut app = App::new(ingest, 10, "mock".to_string(), BaselineMode::Off);
+        app.mode = Mode::Paused;
+        let old = LogEntry {
+            timestamp: Local::now() - chrono::Duration::minutes(30),
+            ..base_entry()
+        };
+        app.push_paused_entry(old, Local::now());
+        assert!(app.paused_buffer.is_empty());
+    }
+
+    #[test]
+    fn token_counts_are_pruned() {
+        let mut map = HashMap::new();
+        for i in 0..10 {
+            map.insert(format!("tok{i}"), 1);
+        }
+        prune_token_counts(&mut map, 5);
+        assert!(map.len() <= 5);
     }
 }

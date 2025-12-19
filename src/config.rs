@@ -24,13 +24,34 @@ pub struct Args {
     /// Maximum number of log lines to retain
     #[arg(long)]
     pub max_lines: Option<usize>,
+
+    /// Record a baseline profile to this file on exit (incompatible with --baseline-compare)
+    #[arg(long, value_name = "FILE", conflicts_with = "baseline_compare")]
+    pub baseline_record: Option<PathBuf>,
+
+    /// Compare against a baseline profile file (incompatible with --baseline-record)
+    #[arg(long, value_name = "FILE", conflicts_with = "baseline_record")]
+    pub baseline_compare: Option<PathBuf>,
 }
 
 #[derive(Clone)]
 pub enum SourceConfig {
     Mock,
-    File(PathBuf),
+    File { path: PathBuf, start: TailStart },
     Stdin,
+}
+
+#[derive(Clone, Copy)]
+pub enum TailStart {
+    Beginning,
+    End,
+}
+
+#[derive(Debug, Clone)]
+pub enum BaselineMode {
+    Off,
+    Record(PathBuf),
+    Compare(PathBuf),
 }
 
 impl SourceConfig {
@@ -38,7 +59,7 @@ impl SourceConfig {
         match self {
             SourceConfig::Mock => "mock feed".to_string(),
             SourceConfig::Stdin => "stdin".to_string(),
-            SourceConfig::File(path) => format!("file: {}", path.display()),
+            SourceConfig::File { path, .. } => format!("file: {} (live tail)", path.display()),
         }
     }
 }
@@ -58,6 +79,7 @@ impl FileConfig {
 #[derive(Debug)]
 pub struct AppConfig {
     pub max_lines: usize,
+    pub baseline: BaselineMode,
 }
 
 impl AppConfig {
@@ -75,7 +97,15 @@ impl AppConfig {
             .max_lines
             .or_else(|| file_cfg.as_ref().and_then(|c| c.max_lines))
             .unwrap_or(DEFAULT_MAX_LINES);
-        AppConfig { max_lines }
+        let baseline = match (&args.baseline_record, &args.baseline_compare) {
+            (Some(path), None) => BaselineMode::Record(path.clone()),
+            (None, Some(path)) => BaselineMode::Compare(path.clone()),
+            _ => BaselineMode::Off,
+        };
+        AppConfig {
+            max_lines,
+            baseline,
+        }
     }
 }
 
@@ -90,6 +120,8 @@ mod tests {
             file: None,
             stdin: false,
             max_lines: None,
+            baseline_record: None,
+            baseline_compare: None,
         };
         let cfg = AppConfig::load(&args);
         assert_eq!(cfg.max_lines, DEFAULT_MAX_LINES);
@@ -105,9 +137,27 @@ mod tests {
             file: None,
             stdin: false,
             max_lines: None,
+            baseline_record: None,
+            baseline_compare: None,
         };
         let cfg = AppConfig::load(&args);
         assert_eq!(cfg.max_lines, 42);
         std::env::remove_var("LOGTM_CONFIG");
+    }
+
+    #[test]
+    fn baseline_mode_respects_record_flag() {
+        let args = Args {
+            file: None,
+            stdin: false,
+            max_lines: None,
+            baseline_record: Some(PathBuf::from("/tmp/base.json")),
+            baseline_compare: None,
+        };
+        let cfg = AppConfig::load(&args);
+        match cfg.baseline {
+            BaselineMode::Record(path) => assert_eq!(path, PathBuf::from("/tmp/base.json")),
+            _ => panic!("expected record mode"),
+        }
     }
 }

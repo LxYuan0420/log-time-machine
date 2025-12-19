@@ -62,7 +62,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Line::from(" b add bookmark | ]/[ next/prev bookmark"),
             Line::from(" Filters match level/target/timestamp/message."),
             Line::from(
-                " Timeline: red=error, yellow=warn, white=info; ^ cursor, * bookmark, # overlap.",
+                " Timeline: red=error, yellow=warn, white=info; ^ cursor, * bookmark, # overlap, ! drift vs baseline.",
             ),
             Line::from(""),
             Line::from("While scrolling up we auto-pause; queued lines show as +N."),
@@ -178,6 +178,9 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         .map(|b| b.info + b.warn + b.error)
         .max()
         .unwrap_or(1);
+    let baseline = app.baseline_overlay();
+    let drift_bins = app.drift_bins();
+    let has_baseline = baseline.is_some();
     let (start, end) = app.timeline().range();
     let cursor_text = app.timeline_cursor_from_end().map(|cursor| {
         let len = app.timeline().len();
@@ -197,14 +200,26 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         cursor_text.unwrap_or_default()
     );
 
-    let parts = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(3).max(1)),
-            Constraint::Length(1),
-            Constraint::Length(2),
-        ])
-        .split(area);
+    let parts = if has_baseline {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(area.height.saturating_sub(5).max(1)),
+                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Length(2),
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(area.height.saturating_sub(3).max(1)),
+                Constraint::Length(1),
+                Constraint::Length(2),
+            ])
+            .split(area)
+    };
 
     let combined: Vec<u64> = data.iter().map(|b| b.info + b.warn + b.error).collect();
     let sparkline = Sparkline::default()
@@ -214,13 +229,34 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         .style(Style::default().fg(Color::Cyan));
     frame.render_widget(sparkline, parts[0]);
 
-    let band = build_band_spans(&data, parts[1].width as usize);
+    if let Some(profile) = baseline {
+        let base_combined: Vec<u64> = profile
+            .bins
+            .iter()
+            .map(|b| b.info + b.warn + b.error)
+            .collect();
+        let base_max = base_combined.iter().copied().max().unwrap_or(1);
+        let baseline_title = format!(
+            "Baseline ghost (bins: {}, window secs: {})",
+            profile.bin_count, profile.window_secs
+        );
+        let base_spark = Sparkline::default()
+            .block(Block::default().title(baseline_title).borders(Borders::ALL))
+            .data(&base_combined)
+            .max(base_max)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(base_spark, parts[1]);
+    }
+
+    let band_idx = if has_baseline { 2 } else { 1 };
+    let marker_idx = if has_baseline { 3 } else { 2 };
+    let band = build_band_spans(&data, parts[band_idx].width as usize);
     let band_para = Paragraph::new(Line::from(band)).block(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
             .border_style(Style::default().fg(Color::DarkGray)),
     );
-    frame.render_widget(band_para, parts[1]);
+    frame.render_widget(band_para, parts[band_idx]);
 
     let mut marks = vec!['.'; data.len()];
     if let Some(cursor) = app.timeline_cursor_from_end() {
@@ -239,20 +275,29 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
+    if let Some(drift) = &drift_bins {
+        for (idx, flagged) in drift.iter().enumerate() {
+            if *flagged {
+                if let Some(slot) = marks.get_mut(idx) {
+                    *slot = if *slot == '.' { '!' } else { *slot };
+                }
+            }
+        }
+    }
     let legend = Line::from(vec![
         Span::styled(" error", Style::default().bg(Color::Red).fg(Color::Black)),
         Span::raw(" "),
         Span::styled(" warn", Style::default().bg(Color::Yellow).fg(Color::Black)),
         Span::raw(" "),
         Span::styled(" info", Style::default().bg(Color::White).fg(Color::Black)),
-        Span::raw("   ^ cursor  * bookmark  # cursor+bookmark"),
+        Span::raw("   ^ cursor  * bookmark  # cursor+bookmark  ! drift"),
     ]);
 
     let marker_str: String = marks.iter().collect();
-    let trimmed = if marker_str.len() > parts[2].width as usize {
+    let trimmed = if marker_str.len() > parts[marker_idx].width as usize {
         marker_str
             .chars()
-            .take(parts[2].width as usize)
+            .take(parts[marker_idx].width as usize)
             .collect::<String>()
     } else {
         marker_str
@@ -262,7 +307,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::LEFT | Borders::RIGHT)
             .border_style(Style::default().fg(Color::DarkGray)),
     );
-    frame.render_widget(markers, parts[2]);
+    frame.render_widget(markers, parts[marker_idx]);
 }
 
 fn build_band_spans(data: &[crate::timeline::Bin], width: usize) -> Vec<Span<'static>> {
@@ -299,6 +344,7 @@ fn build_band_spans(data: &[crate::timeline::Bin], width: usize) -> Vec<Span<'st
 
 fn render_status(frame: &mut Frame, area: Rect, app: &App) {
     let queued = app.queued_len();
+    let drift_bins = app.drift_bins();
     let filter_text = match &app.filters().text {
         Some(text) if !text.is_empty() => {
             if app.filters().regex_mode {
@@ -420,6 +466,46 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         spans
     };
     lines.push(Line::from(filter_spans));
+    if !matches!(app.baseline_mode(), crate::config::BaselineMode::Off) {
+        let drift_count = drift_bins
+            .as_ref()
+            .map(|v| v.iter().filter(|b| **b).count())
+            .unwrap_or(0);
+        let baseline_line = match app.baseline_mode() {
+            crate::config::BaselineMode::Record(path) => {
+                format!("Baseline: recording -> {}", path.display())
+            }
+            crate::config::BaselineMode::Compare(path) => {
+                if app.baseline_overlay().is_some() {
+                    format!(
+                        "Baseline: comparing {} (drift bins: {})",
+                        path.display(),
+                        drift_count
+                    )
+                } else {
+                    format!("Baseline: {} (window/bins incompatible)", path.display())
+                }
+            }
+            crate::config::BaselineMode::Off => String::new(),
+        };
+        if !baseline_line.is_empty() {
+            lines.push(Line::from(baseline_line));
+        }
+        let current_tokens = app.top_tokens_now(3);
+        if let Some(base_tokens) = app.baseline_tokens() {
+            let base_slice: Vec<_> = base_tokens.iter().take(3).cloned().collect();
+            lines.push(Line::from(format!(
+                "Tokens now: {} | baseline: {}",
+                format_tokens(&current_tokens),
+                format_tokens(&base_slice)
+            )));
+        } else if !current_tokens.is_empty() {
+            lines.push(Line::from(format!(
+                "Tokens now: {}",
+                format_tokens(&current_tokens)
+            )));
+        }
+    }
     let bookmark_line = if let Some((idx, bm)) = app.current_bookmark_position() {
         format!(
             "Bookmarks: {} (at {}/{} -> {} @ {})",
@@ -508,6 +594,17 @@ fn level_chip(label: &str, enabled: bool, color: Color) -> Span<'static> {
         style = style.add_modifier(Modifier::CROSSED_OUT | Modifier::DIM);
     }
     Span::styled(label.to_string(), style)
+}
+
+fn format_tokens(tokens: &[crate::baseline::TokenCount]) -> String {
+    if tokens.is_empty() {
+        return "none".to_string();
+    }
+    tokens
+        .iter()
+        .map(|t| format!("{}({})", t.token, t.count))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

@@ -9,17 +9,17 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 - Bookmark jumps with position display; timeline scrub with cursor/bookmark markers.
 - Timeline bands colored by level mix for quick “what’s noisy?” reads.
 - Baseline overlay: record a normal run and compare later with ghost timeline, drift markers, and token deltas.
-- Built-in mock source so `cargo run` works out of the box; file/stdin tailing for real feeds.
+- Built-in mock source so `ltm` works out of the box; file/stdin tailing for real feeds.
 
 ## Quick start
 - Watch the demo: [asciinema cast](https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk)
 - Install: `cargo install ltm`
-- Default mock (no setup): `cargo run`
-- Tail a file (default: from end, live-only): `cargo run -- --file <path-to-your-log>` (e.g., `samples/sample.log`)
-- Tail stdin: `cat <your-log> | cargo run -- --stdin`
-- Record a baseline profile: `cargo run -- --file <path> --baseline-record /tmp/ltm_baseline.json`
-- Compare against a baseline: `cargo run -- --file <path> --baseline-compare /tmp/ltm_baseline.json`
-- Generate and view a live file (script produces the stream, TUI tails it): `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
+- Default mock (no setup): `ltm`
+- Tail a file (default: from end, live-only): `ltm --file <path-to-your-log>`
+- Tail stdin: `cat <your-log> | ltm --stdin`
+- Record a baseline profile: `ltm --file <path> --baseline-record /tmp/ltm_baseline.json`
+- Compare against a baseline: `ltm --file <path> --baseline-compare /tmp/ltm_baseline.json`
+- Help: `ltm --help`
 
 <a href="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk" target="_blank">
   <img src="https://asciinema.org/a/99j7kEJHxRRMmqaVo3Li2GgNk.svg" alt="asciicast" width="640"/>
@@ -38,3 +38,11 @@ Fast, glanceable terminal log viewer: keep your place while new logs stream in, 
 Optional `LOGTM_CONFIG` or `~/.config/logtm/config.toml` with `max_lines = <n>` to cap retained lines. Defaults keep memory bounded.
 
 ![LTM screenshot](docs/screenshot.png)
+
+## Development
+- Run the built-in mock feed: `cargo run` (or `make run-mock`)
+- Tail the included sample log: `cargo run -- --file samples/sample.log` (or `make run-sample`)
+- Generate and view a live file (script produces the stream, TUI tails it): `bash scripts/mock_log_stream.sh /tmp/logtm_live.log >/dev/null 2>&1 & cargo run -- --file /tmp/logtm_live.log`
+
+### Troubleshooting (macOS)
+- If `cargo fmt`/`cargo clippy` hits dyld/LLVM errors, prefer rustup first in PATH: `export PATH="$HOME/.cargo/bin:$PATH"`

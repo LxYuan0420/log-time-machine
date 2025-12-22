@@ -113,9 +113,32 @@ impl AppConfig {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_logtm_config_path<T>(path: Option<&std::path::Path>, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().expect("env lock poisoned");
+        let previous = std::env::var_os("LOGTM_CONFIG");
+        match path {
+            Some(path) => std::env::set_var("LOGTM_CONFIG", path),
+            None => std::env::remove_var("LOGTM_CONFIG"),
+        }
+        let result = f();
+        match previous {
+            Some(value) => std::env::set_var("LOGTM_CONFIG", value),
+            None => std::env::remove_var("LOGTM_CONFIG"),
+        }
+        result
+    }
 
     #[test]
     fn config_merges_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
         let args = Args {
             file: None,
             stdin: false,
@@ -123,7 +146,7 @@ mod tests {
             baseline_record: None,
             baseline_compare: None,
         };
-        let cfg = AppConfig::load(&args);
+        let cfg = with_logtm_config_path(Some(path.as_path()), || AppConfig::load(&args));
         assert_eq!(cfg.max_lines, DEFAULT_MAX_LINES);
     }
 
@@ -132,7 +155,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(&path, "max_lines = 42").unwrap();
-        std::env::set_var("LOGTM_CONFIG", &path);
         let args = Args {
             file: None,
             stdin: false,
@@ -140,9 +162,8 @@ mod tests {
             baseline_record: None,
             baseline_compare: None,
         };
-        let cfg = AppConfig::load(&args);
+        let cfg = with_logtm_config_path(Some(path.as_path()), || AppConfig::load(&args));
         assert_eq!(cfg.max_lines, 42);
-        std::env::remove_var("LOGTM_CONFIG");
     }
 
     #[test]
@@ -154,7 +175,7 @@ mod tests {
             baseline_record: Some(PathBuf::from("/tmp/base.json")),
             baseline_compare: None,
         };
-        let cfg = AppConfig::load(&args);
+        let cfg = with_logtm_config_path(None, || AppConfig::load(&args));
         match cfg.baseline {
             BaselineMode::Record(path) => assert_eq!(path, PathBuf::from("/tmp/base.json")),
             _ => panic!("expected record mode"),
